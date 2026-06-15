@@ -11,7 +11,7 @@ Backend: Python (FastAPI) | Frontend: React (Vite) | DB: MongoDB
 cd backend
 
 pip install fastapi uvicorn groq pymongo python-dotenv
-set GROQ_API_KEY="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" 
+set GROQ_API_KEY="groq_api" 
 
 uvicorn main:app --reload --port 8000
 
