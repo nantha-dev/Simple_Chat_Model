@@ -82,15 +82,46 @@ function App() {
         }]);
       } else {
         const contextMessages = messages
-          .filter(m => !m.image) // Don't send image messages to LLaMA
+          .filter(m => !m.image && m.content) // Don't send image messages to LLaMA
           .map(m => ({ role: m.role, content: m.content }))
           .concat({ role: 'user', content: input });
         
         const response = await axios.post('http://localhost:5000/api/chat', { messages: contextMessages });
-        const aiResponse = response.data.response;
         
-        setMessages(prev => [...prev, { role: 'assistant', content: aiResponse }]);
-        speakResponse(aiResponse);
+        if (response.data.action === 'generate_image') {
+          const prompt = response.data.prompt;
+          
+          setMessages(prev => [...prev, { role: 'assistant', content: `Generating image for: **${prompt}**...` }]);
+          
+          try {
+            const imgResponse = await axios.post('http://localhost:5000/api/generate-image', { prompt });
+            const imageUrl = imgResponse.data.image_url;
+            
+            setMessages(prev => {
+              const newMessages = [...prev];
+              newMessages[newMessages.length - 1] = {
+                role: 'assistant',
+                content: `Here is the image you requested for: **${prompt}**`,
+                image: imageUrl
+              };
+              return newMessages;
+            });
+          } catch (err) {
+            console.error(err);
+            setMessages(prev => {
+              const newMessages = [...prev];
+              newMessages[newMessages.length - 1] = {
+                role: 'assistant',
+                content: "Failed to generate image. Please check the backend console."
+              };
+              return newMessages;
+            });
+          }
+        } else {
+          const aiResponse = response.data.response;
+          setMessages(prev => [...prev, { role: 'assistant', content: aiResponse }]);
+          speakResponse(aiResponse);
+        }
       }
     } catch (error) {
       console.error(error);
@@ -120,7 +151,7 @@ function App() {
           {messages.length === 0 && (
             <div style={{ textAlign: 'center', color: 'var(--text-secondary)', marginTop: '20vh' }}>
               <h2>How can I help you today?</h2>
-              <p style={{ marginTop: '1rem' }}>Type /imagine to generate an image.</p>
+              <p style={{ marginTop: '1rem' }}>Type /imagine or ask to generate an image.</p>
             </div>
           )}
           
@@ -170,7 +201,7 @@ function App() {
             </button>
             <input 
               type="text" 
-              placeholder="Message AI... or type /imagine [prompt]"
+              placeholder="Message AI... or ask to generate an image"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}

@@ -24,21 +24,72 @@ def chat():
     data = request.json
     messages = data.get("messages", [])
     
-    # We use llama3-70b-8192 as requested
+    # We use llama-3.3-70b-versatile as requested
     try:
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "generate_image",
+                    "description": "Use this tool to generate an image when the user asks for one. Provide a detailed image generation prompt.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "prompt": {
+                                "type": "string",
+                                "description": "The detailed description of the image to generate.",
+                            }
+                        },
+                        "required": ["prompt"],
+                    },
+                },
+            }
+        ]
+        
+        # inject a system prompt if not present
+        sys_msg_exists = any(m.get("role") == "system" for m in messages)
+        if not sys_msg_exists:
+            messages.insert(0, {
+                "role": "system", 
+                "content": "You are a helpful AI assistant. If the user asks you to generate or create an image, picture, or drawing, you MUST use the `generate_image` tool. Do NOT output raw <function> XML tags. Only use the standard JSON tool calling format. If the user just wants to chat, reply normally."
+            })
+
         completion = groq_client.chat.completions.create(
-            model="llama3-70b-8192",
+            model="llama-3.3-70b-versatile",
             messages=messages,
+            tools=tools,
             temperature=0.7,
             max_tokens=1024,
             top_p=1,
             stream=False,
             stop=None,
         )
-        response_text = completion.choices[0].message.content
+        
+        message = completion.choices[0].message
+        
+        if message.tool_calls:
+            tool_call = message.tool_calls[0]
+            if tool_call.function.name == "generate_image":
+                import json
+                args = json.loads(tool_call.function.arguments)
+                prompt = args.get("prompt", "")
+                return jsonify({"action": "generate_image", "prompt": prompt})
+
+        response_text = message.content or ""
         return jsonify({"response": response_text})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        error_str = str(e)
+        if "tool_use_failed" in error_str and "<function=generate_image" in error_str:
+            import re, json
+            match = re.search(r'<function=generate_image (\{.*?\}) </function>', error_str)
+            if match:
+                try:
+                    args = json.loads(match.group(1))
+                    prompt = args.get("prompt", "")
+                    return jsonify({"action": "generate_image", "prompt": prompt})
+                except:
+                    pass
+        return jsonify({"error": error_str}), 500
 
 @app.route('/api/generate-image', methods=['POST'])
 def generate_image():
@@ -49,7 +100,7 @@ def generate_image():
     prompt = data.get("prompt", "")
     
     # Hugging Face Inference API for Flux
-    API_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell"
+    API_URL = "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell"
     headers = {"Authorization": f"Bearer {HUGGINGFACE_API_KEY}"}
     
     try:
